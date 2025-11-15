@@ -1,4 +1,5 @@
 mod db;
+mod latency;
 mod models;
 mod processor;
 
@@ -8,6 +9,7 @@ use {
     carbon_log_metrics::LogMetrics,
     carbon_rpc_block_crawler_datasource::{RpcBlockConfig, RpcBlockCrawler},
     carbon_rpc_transaction_crawler_datasource::{ConnectionConfig, Filters, RpcTransactionCrawler},
+    latency::{BlockLatencyRecorder, InstrumentedDatasource},
     processor::JupiterSwapProcessor,
     simplelog::{
         ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, SharedLogger, TermLogger,
@@ -219,6 +221,11 @@ pub async fn main() -> CarbonResult<()> {
         .map_err(|err| {
             CarbonError::Custom(format!("Failed to add Jupiter analytics migration: {err}"))
         })?;
+    migrator
+        .add_migration(db::JupiterSwapLatencyMigration::boxed())
+        .map_err(|err| {
+            CarbonError::Custom(format!("Failed to add Jupiter latency migration: {err}"))
+        })?;
 
     let mut conn = pool.acquire().await.map_err(|err| {
         CarbonError::Custom(format!("Failed to acquire Postgres connection: {err}"))
@@ -230,15 +237,21 @@ pub async fn main() -> CarbonResult<()> {
 
     let rpc_url = env::var("RPC_URL")
         .map_err(|err| CarbonError::Custom(format!("RPC_URL must be set ({err})")))?;
+    let block_latency_recorder = Arc::new(BlockLatencyRecorder::new(pool.clone()));
     let datasource = configure_datasource(rpc_url).await?;
 
     let pipeline_builder = match datasource {
         DatasourceSelection::TransactionCrawler(datasource) => {
-            carbon_core::pipeline::Pipeline::builder().datasource(datasource)
+            carbon_core::pipeline::Pipeline::builder().datasource(InstrumentedDatasource::new(
+                datasource,
+                block_latency_recorder.clone(),
+            ))
         }
-        DatasourceSelection::BlockCrawler(datasource) => {
-            carbon_core::pipeline::Pipeline::builder().datasource(datasource)
-        }
+        DatasourceSelection::BlockCrawler(datasource) => carbon_core::pipeline::Pipeline::builder()
+            .datasource(InstrumentedDatasource::new(
+                datasource,
+                block_latency_recorder.clone(),
+            )),
     };
 
     pipeline_builder

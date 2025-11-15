@@ -3968,6 +3968,7 @@ dependencies = [
  "sqlx",
  "sqlx_migrator",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]

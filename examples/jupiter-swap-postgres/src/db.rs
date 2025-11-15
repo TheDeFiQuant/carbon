@@ -12,6 +12,7 @@ use {
 const MIGRATION_APP: &str = "jupiter_swap_postgres";
 const MIGRATION_NAME: &str = "structured_jupiter_swap";
 const ANALYTICS_MIGRATION_NAME: &str = "jupiter_swap_simple_views";
+const LATENCY_MIGRATION_NAME: &str = "jupiter_swap_latency_measurements";
 
 pub struct JupiterSwapSchemaOperation;
 
@@ -237,6 +238,54 @@ impl JupiterSwapAnalyticsViewsOperation {
     }
 }
 
+pub struct PipelineLatencyMeasurementsOperation;
+
+impl PipelineLatencyMeasurementsOperation {
+    fn boxed() -> Box<dyn Operation<sqlx::Postgres>> {
+        Box::new(Self)
+    }
+}
+
+#[async_trait::async_trait]
+impl Operation<sqlx::Postgres> for PipelineLatencyMeasurementsOperation {
+    async fn up(&self, connection: &mut PgConnection) -> Result<(), MigratorError> {
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS pipeline_latency_measurements (
+                __signature TEXT PRIMARY KEY,
+                slot BIGINT NOT NULL,
+                block_arrival_ts TIMESTAMPTZ,
+                data_inserted_ts TIMESTAMPTZ,
+                aggregation_refreshed_ts TIMESTAMPTZ,
+                materialized_view_refreshed_ts TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            "#,
+        )
+        .execute(&mut *connection)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE INDEX IF NOT EXISTS idx_pipeline_latency_measurements_slot
+                ON pipeline_latency_measurements (slot)
+            "#,
+        )
+        .execute(&mut *connection)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, connection: &mut PgConnection) -> Result<(), MigratorError> {
+        sqlx::query("DROP TABLE IF EXISTS pipeline_latency_measurements")
+            .execute(&mut *connection)
+            .await?;
+        Ok(())
+    }
+}
+
 #[async_trait::async_trait]
 impl Operation<sqlx::Postgres> for JupiterSwapAnalyticsViewsOperation {
     async fn up(&self, connection: &mut PgConnection) -> Result<(), MigratorError> {
@@ -360,6 +409,32 @@ pub struct JupiterSwapSimpleViewsMigration;
 impl JupiterSwapSimpleViewsMigration {
     pub fn boxed() -> Box<dyn Migration<sqlx::Postgres>> {
         Box::new(Self)
+    }
+}
+
+pub struct JupiterSwapLatencyMigration;
+
+impl JupiterSwapLatencyMigration {
+    pub fn boxed() -> Box<dyn Migration<sqlx::Postgres>> {
+        Box::new(Self)
+    }
+}
+
+impl Migration<sqlx::Postgres> for JupiterSwapLatencyMigration {
+    fn app(&self) -> &str {
+        MIGRATION_APP
+    }
+
+    fn name(&self) -> &str {
+        LATENCY_MIGRATION_NAME
+    }
+
+    fn operations(&self) -> Vec<Box<dyn Operation<sqlx::Postgres>>> {
+        vec![PipelineLatencyMeasurementsOperation::boxed()]
+    }
+
+    fn parents(&self) -> Vec<Box<dyn Migration<sqlx::Postgres>>> {
+        vec![JupiterSwapMigration::boxed()]
     }
 }
 

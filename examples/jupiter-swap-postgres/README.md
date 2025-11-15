@@ -214,7 +214,27 @@ REFRESH MATERIALIZED VIEW CONCURRENTLY mv_signature_hop_complexity;
 
 Schedule these commands via cron or a job runner for near-real-time dashboards, or run them manually as you explore the data.
 
-### 7. Typical Workflow
+### 7. Block Latency Measurements
+
+The example also includes a lightweight latency table (`pipeline_latency_measurements`) that captures when a block first arrives inside Carbon. The `InstrumentedDatasource` wrapper records every transaction update coming from `RpcTransactionCrawler`/`RpcBlockCrawler` and immediately inserts (or upserts) a row containing:
+
+- `__signature` – transaction signature (primary key)
+- `slot` – slot reported by the datasource
+- `block_arrival_ts` – `NOW()` when the pipeline first saw the transaction
+- Future fields (`data_inserted_ts`, `aggregation_refreshed_ts`, `materialized_view_refreshed_ts`) stay `NULL` for now but are ready for downstream latency stitching.
+
+Because the instrumentation lives entirely inside `examples/jupiter-swap-postgres`, it adds only a single in-process channel hop before forwarding the update to the core pipeline. You can confirm the measurements are landing by running the example (`cargo run` from this directory) and querying:
+
+```sql
+SELECT __signature, slot, block_arrival_ts
+FROM pipeline_latency_measurements
+ORDER BY block_arrival_ts DESC
+LIMIT 5;
+```
+
+Each new transaction should appear immediately with a freshly recorded timestamp that you can later join against insert/aggregation refresh times.
+
+### 8. Typical Workflow
 
 1. **Start Postgres** (`docker start pg`).
 2. **Confirm RPC credentials** are valid (e.g., curl `{"jsonrpc":"2.0","id":1,"method":"getHealth"}`).
@@ -227,7 +247,7 @@ Schedule these commands via cron or a job runner for near-real-time dashboards, 
    ```
 
 
-### 8. Troubleshooting
+### 9. Troubleshooting
 
 | Symptom | Likely Cause | Fix |
 |---------|--------------|-----|
