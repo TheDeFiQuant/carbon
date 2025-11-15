@@ -118,9 +118,9 @@ async fn configure_datasource(rpc_url: String) -> CarbonResult<DatasourceSelecti
                 start_slot,
             );
 
-            let rate_limit = read_optional_env_var::<u32>("RATE_LIMIT")?
-                .filter(|value| *value > 0);
-            let request_throttle = rate_limit.map(|value| Duration::from_secs_f64(1.0 / value as f64));
+            let rate_limit = read_optional_env_var::<u32>("RATE_LIMIT")?.filter(|value| *value > 0);
+            let request_throttle =
+                rate_limit.map(|value| Duration::from_secs_f64(1.0 / value as f64));
 
             let mut crawler = RpcBlockCrawler::new(
                 rpc_url,
@@ -214,6 +214,11 @@ pub async fn main() -> CarbonResult<()> {
     migrator
         .add_migration(db::JupiterSwapMigration::boxed())
         .map_err(|err| CarbonError::Custom(format!("Failed to add Jupiter migration: {err}")))?;
+    migrator
+        .add_migration(db::JupiterSwapSimpleViewsMigration::boxed())
+        .map_err(|err| {
+            CarbonError::Custom(format!("Failed to add Jupiter analytics migration: {err}"))
+        })?;
 
     let mut conn = pool.acquire().await.map_err(|err| {
         CarbonError::Custom(format!("Failed to acquire Postgres connection: {err}"))

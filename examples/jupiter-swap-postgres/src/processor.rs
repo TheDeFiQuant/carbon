@@ -509,10 +509,7 @@ impl Processor for JupiterSwapProcessor {
                         .await?;
                     if let Some(slot) = last_slot {
                         metrics
-                            .update_gauge(
-                                "postgres.instructions.last_processed_slot",
-                                slot as f64,
-                            )
+                            .update_gauge("postgres.instructions.last_processed_slot", slot as f64)
                             .await?;
                     }
                 }

@@ -196,7 +196,25 @@ Holds decimals + symbol for mints as they are discovered. When a hop references 
 
 ---
 
-### 6. Typical Workflow
+### 6. Real-time Materialized Views
+
+The migration now provisions three lightweight materialized views that query only the base swap tables, so you can refresh them as frequently as your Postgres instance allows:
+
+- `mv_daily_variant_activity` – counts routes per day and per Jupiter `variant` plus the average recorded `slippage_bps`.
+- `mv_hop_type_counts` – shows how many hops each `(event_type, swap_variant)` combination produced (null variants are labeled `unknown`).
+- `mv_signature_hop_complexity` – exposes how many hops (and how many lack a `route_step_index`) each signature produced, which makes it easy to spot multi-hop or incomplete executions.
+
+Each view is backed by a UNIQUE index on its grouping columns, so you can refresh them without blocking readers:
+
+```sql
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_variant_activity;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_hop_type_counts;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_signature_hop_complexity;
+```
+
+Schedule these commands via cron or a job runner for near-real-time dashboards, or run them manually as you explore the data.
+
+### 7. Typical Workflow
 
 1. **Start Postgres** (`docker start pg`).
 2. **Confirm RPC credentials** are valid (e.g., curl `{"jsonrpc":"2.0","id":1,"method":"getHealth"}`).
@@ -208,9 +226,8 @@ Holds decimals + symbol for mints as they are discovered. When a hop references 
    SELECT swap_variant, COUNT(*) FROM jupiter_swap_hops GROUP BY 1 ORDER BY 2 DESC;
    ```
 
----
 
-### 7. Troubleshooting
+### 8. Troubleshooting
 
 | Symptom | Likely Cause | Fix |
 |---------|--------------|-----|
