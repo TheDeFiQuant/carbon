@@ -61,6 +61,64 @@ impl BlockLatencyRecorder {
             ))
         })
     }
+
+    pub async fn record_data_inserted(
+        &self,
+        signature: &str,
+        slot: Option<u64>,
+    ) -> CarbonResult<()> {
+        if let Some(slot) = slot {
+            let slot_value = i64::try_from(slot).map_err(|err| {
+                CarbonError::Custom(format!(
+                    "slot value {slot} is too large for Postgres: {err}"
+                ))
+            })?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO pipeline_latency_measurements (
+                    __signature,
+                    slot,
+                    data_inserted_ts,
+                    updated_at
+                )
+                VALUES ($1, $2, NOW(), NOW())
+                ON CONFLICT (__signature)
+                DO UPDATE SET
+                    slot = EXCLUDED.slot,
+                    data_inserted_ts = NOW(),
+                    updated_at = NOW()
+                "#,
+            )
+            .bind(signature)
+            .bind(slot_value)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                CarbonError::Custom(format!(
+                    "Failed to record insert latency for {signature}: {err}"
+                ))
+            })
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE pipeline_latency_measurements
+                SET data_inserted_ts = NOW(), updated_at = NOW()
+                WHERE __signature = $1
+                "#,
+            )
+            .bind(signature)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(|err| {
+                CarbonError::Custom(format!(
+                    "Failed to update insert latency for {signature}: {err}"
+                ))
+            })
+        }
+    }
 }
 
 pub struct InstrumentedDatasource<D> {

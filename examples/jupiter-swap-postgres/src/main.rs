@@ -257,7 +257,10 @@ pub async fn main() -> CarbonResult<()> {
     pipeline_builder
         .metrics(Arc::new(LogMetrics::new()))
         .metrics_flush_interval(5)
-        .instruction(JupiterSwapDecoder, JupiterSwapProcessor::new(pool.clone()))
+        .instruction(
+            JupiterSwapDecoder,
+            JupiterSwapProcessor::new(pool.clone(), block_latency_recorder.clone()),
+        )
         .shutdown_strategy(carbon_core::pipeline::ShutdownStrategy::Immediate)
         .build()?
         .run()

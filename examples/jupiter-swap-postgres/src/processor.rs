@@ -1,6 +1,7 @@
 use {
     crate::{
         db::JupiterSwapRepository,
+        latency::BlockLatencyRecorder,
         models::{
             capture_account_metas, normalize_route_plan_v1, normalize_route_plan_v2,
             route_plan_json_v1, route_plan_json_v2, AccountMetaRecord, NormalizedRoutePlanStep,
@@ -28,12 +29,14 @@ use {
 
 pub struct JupiterSwapProcessor {
     repository: JupiterSwapRepository,
+    latency_recorder: Arc<BlockLatencyRecorder>,
 }
 
 impl JupiterSwapProcessor {
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: PgPool, latency_recorder: Arc<BlockLatencyRecorder>) -> Self {
         Self {
             repository: JupiterSwapRepository::new(pool),
+            latency_recorder,
         }
     }
 
@@ -100,6 +103,7 @@ impl Processor for JupiterSwapProcessor {
         let (metadata, decoded_instruction, _nested, _raw) = input;
         let mut handled = false;
         let start = Instant::now();
+        let signature = metadata.transaction_metadata.signature.to_string();
 
         let slot_result = match decoded_instruction.data {
             JupiterSwapInstruction::Route(data) => {
@@ -511,6 +515,13 @@ impl Processor for JupiterSwapProcessor {
                         metrics
                             .update_gauge("postgres.instructions.last_processed_slot", slot as f64)
                             .await?;
+                    }
+                    if let Err(err) = self
+                        .latency_recorder
+                        .record_data_inserted(&signature, last_slot)
+                        .await
+                    {
+                        log::error!("Failed to record insert latency: {err}");
                     }
                 }
                 Ok(())
