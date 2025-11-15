@@ -220,11 +220,11 @@ The example also includes a lightweight latency table (`pipeline_latency_measure
 
 - `__signature` – transaction signature (primary key)
 - `slot` – slot reported by the datasource
-- `block_arrival_ts` – `NOW()` when the pipeline first saw the transaction
+- `block_arrival_ts` – timestamp recorded when the corresponding slot first touched your Carbon node (tracked once per slot at the datasource stage and persisted only when that slot ultimately writes Jupiter data)
 - `data_inserted_ts` – populated right after the repository commits the decoded swap/plan rows
 - Future fields (`aggregation_refreshed_ts`, `materialized_view_refreshed_ts`) stay `NULL` for now but are ready for downstream latency stitching.
 
-Because the instrumentation lives entirely inside `examples/jupiter-swap-postgres`, it adds only a single in-process channel hop before forwarding the update to the core pipeline. You can confirm the measurements are landing by running the example (`cargo run` from this directory) and querying:
+Because the instrumentation lives entirely inside `examples/jupiter-swap-postgres`, it adds only a single in-process channel hop before forwarding the update to the core pipeline, and slots that never emit Jupiter swaps are ignored entirely. You can confirm the measurements are landing by running the example (`cargo run` from this directory) and querying:
 
 ```sql
 SELECT __signature, slot, block_arrival_ts

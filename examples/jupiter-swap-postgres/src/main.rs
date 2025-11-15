@@ -9,7 +9,7 @@ use {
     carbon_log_metrics::LogMetrics,
     carbon_rpc_block_crawler_datasource::{RpcBlockConfig, RpcBlockCrawler},
     carbon_rpc_transaction_crawler_datasource::{ConnectionConfig, Filters, RpcTransactionCrawler},
-    latency::{BlockLatencyRecorder, InstrumentedDatasource},
+    latency::{BlockLatencyRecorder, InstrumentedDatasource, SlotArrivalTracker},
     processor::JupiterSwapProcessor,
     simplelog::{
         ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, SharedLogger, TermLogger,
@@ -238,19 +238,20 @@ pub async fn main() -> CarbonResult<()> {
     let rpc_url = env::var("RPC_URL")
         .map_err(|err| CarbonError::Custom(format!("RPC_URL must be set ({err})")))?;
     let block_latency_recorder = Arc::new(BlockLatencyRecorder::new(pool.clone()));
+    let slot_arrival_tracker = Arc::new(SlotArrivalTracker::new());
     let datasource = configure_datasource(rpc_url).await?;
 
     let pipeline_builder = match datasource {
         DatasourceSelection::TransactionCrawler(datasource) => {
             carbon_core::pipeline::Pipeline::builder().datasource(InstrumentedDatasource::new(
                 datasource,
-                block_latency_recorder.clone(),
+                slot_arrival_tracker.clone(),
             ))
         }
         DatasourceSelection::BlockCrawler(datasource) => carbon_core::pipeline::Pipeline::builder()
             .datasource(InstrumentedDatasource::new(
                 datasource,
-                block_latency_recorder.clone(),
+                slot_arrival_tracker.clone(),
             )),
     };
 
@@ -259,7 +260,11 @@ pub async fn main() -> CarbonResult<()> {
         .metrics_flush_interval(5)
         .instruction(
             JupiterSwapDecoder,
-            JupiterSwapProcessor::new(pool.clone(), block_latency_recorder.clone()),
+            JupiterSwapProcessor::new(
+                pool.clone(),
+                block_latency_recorder.clone(),
+                slot_arrival_tracker.clone(),
+            ),
         )
         .shutdown_strategy(carbon_core::pipeline::ShutdownStrategy::Immediate)
         .build()?

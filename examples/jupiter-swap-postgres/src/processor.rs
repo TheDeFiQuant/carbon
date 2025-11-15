@@ -1,7 +1,7 @@
 use {
     crate::{
         db::JupiterSwapRepository,
-        latency::BlockLatencyRecorder,
+        latency::{BlockLatencyRecorder, SlotArrivalTracker},
         models::{
             capture_account_metas, normalize_route_plan_v1, normalize_route_plan_v2,
             route_plan_json_v1, route_plan_json_v2, AccountMetaRecord, NormalizedRoutePlanStep,
@@ -30,13 +30,19 @@ use {
 pub struct JupiterSwapProcessor {
     repository: JupiterSwapRepository,
     latency_recorder: Arc<BlockLatencyRecorder>,
+    slot_arrival_tracker: Arc<SlotArrivalTracker>,
 }
 
 impl JupiterSwapProcessor {
-    pub fn new(pool: PgPool, latency_recorder: Arc<BlockLatencyRecorder>) -> Self {
+    pub fn new(
+        pool: PgPool,
+        latency_recorder: Arc<BlockLatencyRecorder>,
+        slot_arrival_tracker: Arc<SlotArrivalTracker>,
+    ) -> Self {
         Self {
             repository: JupiterSwapRepository::new(pool),
             latency_recorder,
+            slot_arrival_tracker,
         }
     }
 
@@ -104,6 +110,7 @@ impl Processor for JupiterSwapProcessor {
         let mut handled = false;
         let start = Instant::now();
         let signature = metadata.transaction_metadata.signature.to_string();
+        let slot = metadata.transaction_metadata.slot;
 
         let slot_result = match decoded_instruction.data {
             JupiterSwapInstruction::Route(data) => {
@@ -516,9 +523,23 @@ impl Processor for JupiterSwapProcessor {
                             .update_gauge("postgres.instructions.last_processed_slot", slot as f64)
                             .await?;
                     }
+                    let slot_value = last_slot.unwrap_or(slot);
+                    if let Some(arrival_ts) = self
+                        .slot_arrival_tracker
+                        .take_slot_arrival(slot_value)
+                        .await
+                    {
+                        if let Err(err) = self
+                            .latency_recorder
+                            .record_block_arrival(&signature, slot_value, arrival_ts)
+                            .await
+                        {
+                            log::error!("Failed to record block arrival: {err}");
+                        }
+                    }
                     if let Err(err) = self
                         .latency_recorder
-                        .record_data_inserted(&signature, last_slot)
+                        .record_data_inserted(&signature, slot_value)
                         .await
                     {
                         log::error!("Failed to record insert latency: {err}");
