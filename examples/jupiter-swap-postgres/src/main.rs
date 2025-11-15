@@ -1,14 +1,10 @@
-mod db;
-mod models;
-mod processor;
-
 use {
     carbon_core::error::{CarbonResult, Error as CarbonError},
     carbon_jupiter_swap_decoder::{JupiterSwapDecoder, PROGRAM_ID as JUPITER_SWAP_PROGRAM_ID},
     carbon_log_metrics::LogMetrics,
     carbon_rpc_block_crawler_datasource::{RpcBlockConfig, RpcBlockCrawler},
     carbon_rpc_transaction_crawler_datasource::{ConnectionConfig, Filters, RpcTransactionCrawler},
-    processor::JupiterSwapProcessor,
+    jupiter_swap_postgres::{db, processor::JupiterSwapProcessor},
     simplelog::{
         ColorChoice, CombinedLogger, ConfigBuilder, LevelFilter, SharedLogger, TermLogger,
         TerminalMode, WriteLogger,
@@ -118,9 +114,9 @@ async fn configure_datasource(rpc_url: String) -> CarbonResult<DatasourceSelecti
                 start_slot,
             );
 
-            let rate_limit = read_optional_env_var::<u32>("RATE_LIMIT")?
-                .filter(|value| *value > 0);
-            let request_throttle = rate_limit.map(|value| Duration::from_secs_f64(1.0 / value as f64));
+            let rate_limit = read_optional_env_var::<u32>("RATE_LIMIT")?.filter(|value| *value > 0);
+            let request_throttle =
+                rate_limit.map(|value| Duration::from_secs_f64(1.0 / value as f64));
 
             let mut crawler = RpcBlockCrawler::new(
                 rpc_url,

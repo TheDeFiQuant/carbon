@@ -192,7 +192,7 @@ Raw JSON envelopes for every swap-related event, keyed by signature/instruction/
 Simple reference table mapping each `swap_variant` to a label/category (auto-populated the first time a variant appears).
 
 #### `mint_reference_data`
-Holds decimals + symbol for mints as they are discovered. When a hop references a mint that we do not know, the hop is marked `normalization_pending` until decimals are backfilled.
+Holds decimals + symbol for mints as they are discovered. When a hop references a mint that we do not know, the hop is marked `normalization_pending` until decimals are backfilled. Hydrate this table by running the standalone metadata sync (`cargo run -p jupiter-token-metadata`), which calls the Jupiter tokens lite API (default URL `https://tokens.jup.ag/lite`) and only falls back to RPC if the lite API does not carry decimals for a mint. Override the endpoint with `TOKEN_LIST_URL` if you host your own mirror.
 
 ---
 
@@ -202,6 +202,7 @@ Holds decimals + symbol for mints as they are discovered. When a hop references 
 2. **Confirm RPC credentials** are valid (e.g., curl `{"jsonrpc":"2.0","id":1,"method":"getHealth"}`).
 3. **Adjust `.env`** if you want a different `DATASOURCE`, `RATE_LIMIT`, database host, or RPC endpoint.
 4. **Run the pipeline** (`cargo run`). Leave it running to keep ingesting swaps; restart as needed.
+5. **Run the metadata sync** (`cargo run -p jupiter-token-metadata`) whenever you need fresh mint decimals/symbols populated in `mint_reference_data`.
 5. **Inspect data** with `psql` queries such as:
    ```sql
    SELECT variant, COUNT(*) FROM jupiter_route_instructions GROUP BY 1;

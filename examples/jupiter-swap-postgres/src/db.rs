@@ -116,6 +116,9 @@ impl Operation<sqlx::Postgres> for JupiterSwapSchemaOperation {
                 mint TEXT PRIMARY KEY,
                 decimals INTEGER,
                 symbol TEXT,
+                name TEXT,
+                category TEXT,
+                source TEXT,
                 last_updated_slot NUMERIC,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -123,6 +126,16 @@ impl Operation<sqlx::Postgres> for JupiterSwapSchemaOperation {
         )
         .execute(&mut *connection)
         .await?;
+
+        sqlx::query("ALTER TABLE mint_reference_data ADD COLUMN IF NOT EXISTS name TEXT")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("ALTER TABLE mint_reference_data ADD COLUMN IF NOT EXISTS category TEXT")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("ALTER TABLE mint_reference_data ADD COLUMN IF NOT EXISTS source TEXT")
+            .execute(&mut *connection)
+            .await?;
 
         sqlx::query(
             r#"
@@ -437,10 +450,7 @@ impl JupiterSwapRepository {
         Ok(slot_value)
     }
 
-    pub async fn persist_swap_event(
-        &self,
-        record: SwapEventRecord,
-    ) -> CarbonResult<Option<u64>> {
+    pub async fn persist_swap_event(&self, record: SwapEventRecord) -> CarbonResult<Option<u64>> {
         let mut tx = self.pool.begin().await.map_err(to_carbon_error)?;
         let MetadataParts {
             signature,
@@ -753,6 +763,142 @@ impl JupiterSwapRepository {
 
         Ok(result.map(|row| row.get::<i32, _>("decimals")))
     }
+
+    pub async fn upsert_mint_reference_data(
+        &self,
+        record: MintReferenceUpdate,
+    ) -> CarbonResult<()> {
+        let MintReferenceUpdate {
+            mint,
+            decimals,
+            symbol,
+            name,
+            category,
+            source,
+            last_updated_slot,
+        } = record;
+        let last_slot_decimal = last_updated_slot.map(decimal_from_u64);
+
+        sqlx::query(
+            r#"
+            INSERT INTO mint_reference_data (
+                mint,
+                decimals,
+                symbol,
+                name,
+                category,
+                source,
+                last_updated_slot,
+                updated_at
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+            ON CONFLICT (mint) DO UPDATE SET
+                decimals = EXCLUDED.decimals,
+                symbol = EXCLUDED.symbol,
+                name = EXCLUDED.name,
+                category = EXCLUDED.category,
+                source = EXCLUDED.source,
+                last_updated_slot = EXCLUDED.last_updated_slot,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(&mint)
+        .bind(decimals)
+        .bind(symbol.as_deref())
+        .bind(name.as_deref())
+        .bind(category.as_deref())
+        .bind(source.as_deref())
+        .bind(last_slot_decimal)
+        .execute(&self.pool)
+        .await
+        .map_err(to_carbon_error)?;
+
+        Ok(())
+    }
+
+    pub async fn pending_mints(
+        &self,
+        limit: i64,
+        stale_after_secs: i64,
+    ) -> CarbonResult<Vec<String>> {
+        if limit <= 0 {
+            return Ok(vec![]);
+        }
+
+        let mut missing: Vec<String> = sqlx::query(
+            r#"
+            WITH candidates AS (
+                SELECT DISTINCT input_mint AS mint
+                FROM jupiter_swap_hops
+                WHERE input_mint IS NOT NULL AND input_mint <> ''
+                UNION
+                SELECT DISTINCT output_mint AS mint
+                FROM jupiter_swap_hops
+                WHERE output_mint IS NOT NULL AND output_mint <> ''
+                UNION
+                SELECT DISTINCT source_mint AS mint
+                FROM jupiter_route_instructions
+                WHERE source_mint IS NOT NULL AND source_mint <> ''
+                UNION
+                SELECT DISTINCT destination_mint AS mint
+                FROM jupiter_route_instructions
+                WHERE destination_mint IS NOT NULL AND destination_mint <> ''
+            )
+            SELECT mint
+            FROM candidates
+            WHERE NOT EXISTS (
+                SELECT 1 FROM mint_reference_data rd WHERE rd.mint = candidates.mint
+            )
+            ORDER BY mint
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(to_carbon_error)?
+        .into_iter()
+        .map(|row| row.get("mint"))
+        .collect();
+
+        let remaining = limit.saturating_sub(missing.len() as i64);
+        if remaining > 0 && stale_after_secs > 0 {
+            let mut stale: Vec<String> = sqlx::query(
+                r#"
+                SELECT mint
+                FROM mint_reference_data
+                WHERE mint IS NOT NULL
+                  AND mint <> ''
+                  AND updated_at < NOW() - ($1 * INTERVAL '1 second')
+                ORDER BY updated_at ASC
+                LIMIT $2
+                "#,
+            )
+            .bind(stale_after_secs)
+            .bind(remaining)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(to_carbon_error)?
+            .into_iter()
+            .map(|row| row.get("mint"))
+            .collect();
+
+            missing.append(&mut stale);
+        }
+
+        Ok(missing)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct MintReferenceUpdate {
+    pub mint: String,
+    pub decimals: i32,
+    pub symbol: Option<String>,
+    pub name: Option<String>,
+    pub category: Option<String>,
+    pub source: Option<String>,
+    pub last_updated_slot: Option<u64>,
 }
 
 struct MetadataParts {

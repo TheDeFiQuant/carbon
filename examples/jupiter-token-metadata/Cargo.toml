@@ -1,0 +1,20 @@
+[package]
+name = "jupiter-token-metadata"
+version = "0.1.0"
+edition = { workspace = true }
+
+[dependencies]
+carbon-core = { workspace = true, features = ["postgres"] }
+jupiter-swap-postgres = { path = "../jupiter-swap-postgres" }
+dotenv = { workspace = true }
+env_logger = "0.11"
+log = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+solana-client = { workspace = true }
+solana-commitment-config = { workspace = true }
+solana-pubkey = { workspace = true }
+sqlx = { workspace = true }
+sqlx_migrator = { workspace = true }
