@@ -13,6 +13,7 @@ const MIGRATION_APP: &str = "jupiter_swap_postgres";
 const MIGRATION_NAME: &str = "structured_jupiter_swap";
 const ANALYTICS_MIGRATION_NAME: &str = "jupiter_swap_simple_views";
 const LATENCY_MIGRATION_NAME: &str = "jupiter_swap_latency_measurements";
+const REALTIME_VIEWS_MIGRATION_NAME: &str = "jupiter_swap_realtime_views";
 
 pub struct JupiterSwapSchemaOperation;
 
@@ -435,6 +436,106 @@ impl Migration<sqlx::Postgres> for JupiterSwapLatencyMigration {
 
     fn parents(&self) -> Vec<Box<dyn Migration<sqlx::Postgres>>> {
         vec![JupiterSwapMigration::boxed()]
+    }
+}
+
+pub struct JupiterSwapRealtimeViewsOperation;
+
+impl JupiterSwapRealtimeViewsOperation {
+    fn boxed() -> Box<dyn Operation<sqlx::Postgres>> {
+        Box::new(Self)
+    }
+}
+
+#[async_trait::async_trait]
+impl Operation<sqlx::Postgres> for JupiterSwapRealtimeViewsOperation {
+    async fn up(&self, connection: &mut PgConnection) -> Result<(), MigratorError> {
+        // Replace materialized views with regular views for real-time reads.
+        sqlx::query("DROP MATERIALIZED VIEW IF EXISTS mv_daily_variant_activity")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("DROP MATERIALIZED VIEW IF EXISTS mv_hop_type_counts")
+            .execute(&mut *connection)
+            .await?;
+        sqlx::query("DROP MATERIALIZED VIEW IF EXISTS mv_signature_hop_complexity")
+            .execute(&mut *connection)
+            .await?;
+
+        sqlx::query(
+            r#"
+            CREATE OR REPLACE VIEW mv_daily_variant_activity AS
+            SELECT
+                date_trunc('day', created_at) AS trade_day,
+                variant,
+                COUNT(*) AS route_count,
+                AVG(slippage_bps) AS avg_slippage_bps
+            FROM jupiter_route_instructions
+            GROUP BY 1, 2
+            "#,
+        )
+        .execute(&mut *connection)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE OR REPLACE VIEW mv_hop_type_counts AS
+            SELECT
+                event_type,
+                COALESCE(swap_variant, 'unknown') AS swap_variant,
+                COUNT(*) AS hop_count
+            FROM jupiter_swap_hops
+            GROUP BY 1, 2
+            "#,
+        )
+        .execute(&mut *connection)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE OR REPLACE VIEW mv_signature_hop_complexity AS
+            SELECT
+                __signature,
+                COUNT(*) AS hop_count,
+                COUNT(*) FILTER (WHERE route_step_index IS NULL) AS unassigned_hops
+            FROM jupiter_swap_hops
+            GROUP BY __signature
+            "#,
+        )
+        .execute(&mut *connection)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn down(&self, _connection: &mut PgConnection) -> Result<(), MigratorError> {
+        // Intentionally leave views in place on down to avoid dropping user dashboards.
+        Ok(())
+    }
+}
+
+pub struct JupiterSwapRealtimeViewsMigration;
+
+impl JupiterSwapRealtimeViewsMigration {
+    pub fn boxed() -> Box<dyn Migration<sqlx::Postgres>> {
+        Box::new(Self)
+    }
+}
+
+impl Migration<sqlx::Postgres> for JupiterSwapRealtimeViewsMigration {
+    fn app(&self) -> &str {
+        MIGRATION_APP
+    }
+
+    fn name(&self) -> &str {
+        REALTIME_VIEWS_MIGRATION_NAME
+    }
+
+    fn operations(&self) -> Vec<Box<dyn Operation<sqlx::Postgres>>> {
+        vec![JupiterSwapRealtimeViewsOperation::boxed()]
+    }
+
+    fn parents(&self) -> Vec<Box<dyn Migration<sqlx::Postgres>>> {
+        vec![JupiterSwapSimpleViewsMigration::boxed()]
     }
 }
 

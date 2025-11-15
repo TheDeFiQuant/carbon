@@ -103,6 +103,47 @@ impl BlockLatencyRecorder {
             ))
         })
     }
+
+    pub async fn record_aggregation_refreshed(
+        &self,
+        signature: &str,
+        slot: u64,
+        refreshed_at: DateTime<Utc>,
+    ) -> CarbonResult<()> {
+        let slot_value = i64::try_from(slot).map_err(|err| {
+            CarbonError::Custom(format!(
+                "slot value {slot} is too large for Postgres: {err}"
+            ))
+        })?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO pipeline_latency_measurements (
+                __signature,
+                slot,
+                aggregation_refreshed_ts,
+                updated_at
+            )
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (__signature)
+            DO UPDATE SET
+                slot = EXCLUDED.slot,
+                aggregation_refreshed_ts = EXCLUDED.aggregation_refreshed_ts,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(signature)
+        .bind(slot_value)
+        .bind(refreshed_at)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|err| {
+            CarbonError::Custom(format!(
+                "Failed to record aggregation refresh for {signature}: {err}"
+            ))
+        })
+    }
 }
 
 pub struct SlotArrivalTracker {

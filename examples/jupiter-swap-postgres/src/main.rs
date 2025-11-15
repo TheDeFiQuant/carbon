@@ -226,6 +226,13 @@ pub async fn main() -> CarbonResult<()> {
         .map_err(|err| {
             CarbonError::Custom(format!("Failed to add Jupiter latency migration: {err}"))
         })?;
+    migrator
+        .add_migration(db::JupiterSwapRealtimeViewsMigration::boxed())
+        .map_err(|err| {
+            CarbonError::Custom(format!(
+                "Failed to add Jupiter realtime views migration: {err}"
+            ))
+        })?;
 
     let mut conn = pool.acquire().await.map_err(|err| {
         CarbonError::Custom(format!("Failed to acquire Postgres connection: {err}"))

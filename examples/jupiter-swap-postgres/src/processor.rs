@@ -544,6 +544,13 @@ impl Processor for JupiterSwapProcessor {
                     {
                         log::error!("Failed to record insert latency: {err}");
                     }
+                    if let Err(err) = self
+                        .latency_recorder
+                        .record_aggregation_refreshed(&signature, slot_value, chrono::Utc::now())
+                        .await
+                    {
+                        log::error!("Failed to record aggregation refresh latency: {err}");
+                    }
                 }
                 Ok(())
             }
